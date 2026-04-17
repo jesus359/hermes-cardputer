@@ -23,6 +23,7 @@
 #include <SD.h>
 #include <SPI.h>
 #include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 
 // OTA
 #include <ArduinoOTA.h>
@@ -48,6 +49,9 @@ int    ttsPort  = 443;
 String ttsKey   = "";  // Set in config.json: "ttsKey"
 String ttsModel = "eleven_turbo_v2";
 String ttsVoice = "21m00Tcm4TlvDq8ikWAM"; // Rachel
+
+// OTA GitHub update
+String updateUrl = "https://github.com/jesus359/hermes-cardputer/releases/latest/download/cardputer_chat_wifi.ino.bin";
 // ==================================================
 
 // Display layout
@@ -1453,6 +1457,7 @@ void handleKeyboard() {
             addToChat("/clear  Clear chat");
             addToChat("/voice  Toggle voice mode");
             addToChat("/files  Web portal (SD card)");
+            addToChat("/update Update firmware from GitHub");
             addToChat("/ir CMD Send IR command");
             addToChat("---");
             addToChat("Fn+; Scroll up  Fn+. Scroll down");
@@ -1480,6 +1485,8 @@ void handleKeyboard() {
               addToChat("SYS: Portal already active at http://" + portalIP);
             }
             drawChat();
+          } else if (toSend == "/update") {
+            performOtaUpdate();
           } else if (toSend.startsWith("/ir ")) {
             String irCmd = toSend.substring(4);
             addToChat("SYS: IR TX -> " + irCmd + " (Pin 44)");
@@ -1677,6 +1684,8 @@ void setup() {
         if (doc.containsKey("ttsKey")) ttsKey = doc["ttsKey"].as<String>();
         if (doc.containsKey("ttsModel")) ttsModel = doc["ttsModel"].as<String>();
         if (doc.containsKey("ttsVoice")) ttsVoice = doc["ttsVoice"].as<String>();
+        // OTA GitHub
+        if (doc.containsKey("updateUrl")) updateUrl = doc["updateUrl"].as<String>();
         Serial.println("CONFIG: loaded from SD card");
         Serial.println("  hermes=" + host + ":" + String(port));
         Serial.println("  stt=" + sttHost + ":" + String(sttPort) + " model=" + sttModel);
@@ -1784,6 +1793,105 @@ void setup() {
     Serial.println("HTTP OTA ready at: http://cardputer.local/update");
     Serial.println("Web Portal ready at: http://cardputer.local/");
   }
+}
+
+// GitHub OTA update — downloads .bin from updateUrl and self-flashes
+void performOtaUpdate() {
+  if (WiFi.status() != WL_CONNECTED) {
+    addToChat("!! Update failed: No WiFi");
+    drawChat();
+    return;
+  }
+  if (updateUrl.length() == 0) {
+    addToChat("!! Update failed: No updateUrl in config");
+    drawChat();
+    return;
+  }
+
+  addToChat("SYS: Checking for update...");
+  addToChat("SYS: " + updateUrl);
+  drawChat();
+
+  WiFiClientSecure client;
+  client.setInsecure();  // Skip cert verification for GitHub HTTPS
+
+  HTTPClient http;
+  http.begin(client, updateUrl);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setTimeout(60000);  // 60s for large downloads
+
+  int httpCode = http.GET();
+  if (httpCode != 200) {
+    addToChat("!! HTTP error: " + String(httpCode));
+    drawChat();
+    http.end();
+    return;
+  }
+
+  int contentLength = http.getSize();
+  if (contentLength <= 0) {
+    addToChat("!! No content length");
+    drawChat();
+    http.end();
+    return;
+  }
+
+  addToChat("SYS: Downloading " + String(contentLength / 1024) + "KB...");
+  drawChat();
+
+  WiFiClient* stream = http.getStreamPtr();
+  if (!Update.begin(contentLength)) {
+    addToChat("!! OTA begin failed");
+    drawChat();
+    http.end();
+    return;
+  }
+
+  uint8_t buf[4096];
+  int written = 0;
+  unsigned long lastUpdate = millis();
+
+  while (http.connected() && written < contentLength) {
+    size_t avail = stream->available();
+    if (avail) {
+      int toRead = min(avail, sizeof(buf));
+      int bytesRead = stream->read(buf, toRead);
+      if (bytesRead > 0) {
+        size_t w = Update.write(buf, bytesRead);
+        if (w != (size_t)bytesRead) {
+          addToChat("!! Write error");
+          drawChat();
+          Update.abort();
+          http.end();
+          return;
+        }
+        written += bytesRead;
+
+        // Update screen every 500ms
+        if (millis() - lastUpdate > 500) {
+          int pct = (written * 100) / contentLength;
+          addToChat("SYS: " + String(pct) + "% (" + String(written / 1024) + "KB)");
+          drawChat();
+          lastUpdate = millis();
+        }
+      }
+    } else {
+      delay(1);
+    }
+  }
+
+  if (!Update.end(true)) {
+    addToChat("!! OTA finalize failed");
+    drawChat();
+    http.end();
+    return;
+  }
+
+  addToChat("SYS: Update complete! Rebooting...");
+  drawChat();
+  Serial.println("GitHub OTA: " + String(written) + " bytes written. Rebooting...");
+  delay(1000);
+  ESP.restart();
 }
 
 void loop() {

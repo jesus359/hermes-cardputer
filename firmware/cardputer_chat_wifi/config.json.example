@@ -14,5 +14,7 @@
   "ttsPort": 443,
   "ttsKey": "YOUR_ELEVENLABS_API_KEY",
   "ttsModel": "eleven_turbo_v2",
-  "ttsVoice": "21m00Tcm4TlvDq8ikWAM"
+  "ttsVoice": "21m00Tcm4TlvDq8ikWAM",
+
+  "updateUrl": "https://github.com/jesus359/hermes-cardputer/releases/latest/download/cardputer_chat_wifi.ino.bin"
 }
