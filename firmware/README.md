@@ -1,11 +1,12 @@
 # Firmware
 
-Cardputer-Hermes WiFi chat firmware for M5Stack Cardputer (ESP32-S3).
+Cardputer-Chat WiFi chat firmware for M5Stack Cardputer (ESP32-S3).
 
 ## Active Firmware
 
-- **cardputer_chat_wifi/** — v0.2 + OTA
-  - `cardputer_chat_wifi.ino` — source (single file, ~1700 lines)
+- **cardputer_chat_wifi/** — v0.2.3
+  - `cardputer_chat_wifi.ino` — source (single file, ~2300 lines)
+  - `config.json.example` — SD card config template
 
 ## Features
 
@@ -21,7 +22,7 @@ Cardputer-Hermes WiFi chat firmware for M5Stack Cardputer (ESP32-S3).
 - Auto-reconnect on WiFi drops
 - Voice mode (Deepgram STT + ElevenLabs TTS)
 - SD card config (/config.json)
-- File browser + editor mode
+- Web portal for SD card file management (via browser)
 
 ## Build
 
@@ -66,9 +67,15 @@ Config loaded from `/config.json` on SD card at boot. Falls back to hardcoded de
 {
   "ssid": "YOUR_WIFI_SSID",
   "password": "YOUR_WIFI_PASSWORD",
-  "apiKey": "HERMES_API_KEY",
-  "host": "HERMES_API_SERVER_IP",
-  "port": "HERMES_API_PORT"
+  "apiKey": "YOUR_API_KEY",
+  "host": "YOUR_API_SERVER_IP",
+  "port": 11434,
+
+  "sttHost": "api.deepgram.com",
+  "sttKey": "YOUR_DEEPGRAM_API_KEY",
+
+  "ttsHost": "api.elevenlabs.io",
+  "ttsKey": "YOUR_ELEVENLABS_API_KEY"
 }
 ```
 

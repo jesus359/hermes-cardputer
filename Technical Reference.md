@@ -11,7 +11,7 @@
 
 ---
 
-## Firmware: cardputer_chat_wifi.ino v2.6
+## Firmware: cardputer_chat_wifi v0.2.3
 
 ### Configuration
 
@@ -52,9 +52,9 @@ Loaded from `/config.json` on SD card. Falls back to hardcoded defaults in sourc
 #define INPUT_H        13    // Bottom input bar
 #define CHAT_H         110   // SCREEN_H - STATUS_H - INPUT_H
 #define CHAR_W         6     // textSize(1) char width
-#define LINE_H         12    // textSize(1) line height
+#define LINE_H         10    // textSize(1) line height
 #define CHARS_PER_LINE 39    // Max chars per line
-#define VISIBLE_LINES  9     // Lines visible on screen
+#define VISIBLE_LINES  11    // Lines visible on screen
 #define SCROLLBAR_X    235   // Scrollbar position
 ```
 

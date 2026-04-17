@@ -4,6 +4,15 @@
   "apiKey": "YOUR_API_KEY",
   "host": "YOUR_API_SERVER_IP",
   "port": 11434,
-  "sttKey": "",
-  "ttsKey": ""
+
+  "sttHost": "api.deepgram.com",
+  "sttPort": 443,
+  "sttKey": "YOUR_DEEPGRAM_API_KEY",
+  "sttModel": "nova-2",
+
+  "ttsHost": "api.elevenlabs.io",
+  "ttsPort": 443,
+  "ttsKey": "YOUR_ELEVENLABS_API_KEY",
+  "ttsModel": "eleven_turbo_v2",
+  "ttsVoice": "21m00Tcm4TlvDq8ikWAM"
 }

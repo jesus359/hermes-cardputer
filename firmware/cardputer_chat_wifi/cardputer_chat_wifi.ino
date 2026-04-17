@@ -1,12 +1,18 @@
 /*
- * Cardputer-Chat v2.6 (WiFi + OTA)
- *
- * WiFi chat terminal for OpenAI-compatible API servers.
- * Streams responses via SSE on a 240x135 color display.
- * Over-the-air firmware updates (no USB needed after initial flash).
- *
- * Hardware: M5Stack Cardputer (ESP32-S3)
- * API: Any OpenAI-compatible /v1/chat/completions endpoint
+ * Cardputer-Hermes Chat v0.2.3 (WiFi - Full Featured)
+ * 
+ * Features:
+ * - Streaming responses (chunked HTTP)
+ * - Scrollable chat with word-boundary text wrapping
+ * - Status bar: WiFi RSSI (icon), battery (icon), API state (icon)
+ * - Fn+; scroll up / Fn+. scroll down / Fn+Enter=bottom
+ * - Fn+Backspace clear chat / long Backspace clear input
+ * - Short/long press differentiation (600ms threshold)
+ * - Conversation history context (multi-turn)
+ * - Web portal file manager (SD card edit via browser)
+ * 
+ * Hardware: M5Stack Cardputer
+ * Connection: WiFi to Hermes API (OpenAI-compatible)
  */
 
 #include <M5Cardputer.h>
@@ -52,9 +58,9 @@ String ttsVoice = "21m00Tcm4TlvDq8ikWAM"; // Rachel
 #define CHAT_Y         STATUS_H
 #define CHAT_H         (SCREEN_H - STATUS_H - INPUT_H)  // 110
 #define CHAR_W         6
-#define LINE_H         12
+#define LINE_H         10
 #define CHARS_PER_LINE 39   // (SCREEN_W - 6) / CHAR_W
-#define VISIBLE_LINES  9    // CHAT_H / LINE_H
+#define VISIBLE_LINES  11   // CHAT_H / LINE_H
 #define SCROLLBAR_X    (SCREEN_W - 5)
 
 // Buffers
@@ -120,7 +126,8 @@ bool sdMounted = false;
 bool imuAvailable = false;
 
 // App Modes
-enum AppMode { MODE_CHAT, MODE_BROWSER, MODE_EDITOR, MODE_BROWSER_INPUT };
+// App mode — browser/editor replaced by web portal (v0.2.3)
+enum AppMode { MODE_CHAT };
 AppMode appMode = MODE_CHAT;
 
 // Voice mode toggle and state machine
@@ -128,13 +135,9 @@ bool voiceMode = false;
 enum VoiceState { V_IDLE, V_LISTEN, V_UPLOAD, V_THINK, V_FETCH, V_SPEAK };
 VoiceState vState = V_IDLE;
 
-// Forward declarations for FS tools
-void enterBrowser();
-void handleBrowserKeys(int key, bool fnDown);
-void handleEditorKeys(int key, bool fnDown);
-void handleBrowserInputKeys(int key, bool fnDown);
-void drawBrowserPrompt();
-void createNewFile(String filename);
+// Web portal handles file operations (no on-device browser/editor)
+void drawPortalScreen();
+uint8_t getShiftedChar(uint8_t key);
 
 // Input history (5 entries, cycle with Fn+Up / Fn+Down)
 #define HIST_SIZE 5
@@ -144,6 +147,10 @@ int histIdx   = -1;  // -1 = not browsing history
 
 // Heap warning threshold
 #define HEAP_WARN_BYTES 20000
+
+// Web portal state — on-demand server (v0.2.3)
+bool portalActive = false;
+String portalIP = "";
 
 // ============================================================
 // KEYBOARD TRACKING
@@ -515,6 +522,7 @@ void drawStatusBar() {
 void drawChat() {
   // Clear chat area
   M5Cardputer.Display.fillRect(0, CHAT_Y, SCROLLBAR_X, CHAT_H, BLACK);
+  M5Cardputer.Display.setTextSize(1);
   
   int start = scrollPos;
   int end = min(start + VISIBLE_LINES, chatCount);
@@ -559,6 +567,7 @@ void drawScrollbar() {
 
 void drawInputBar() {
   M5Cardputer.Display.fillRect(0, SCREEN_H - INPUT_H, SCREEN_W, INPUT_H, COL_INPUT_BG);
+  M5Cardputer.Display.setTextSize(1);
   M5Cardputer.Display.setCursor(0, SCREEN_H - INPUT_H + 2);
   M5Cardputer.Display.setTextColor(0xFFE0);
   String display = "> " + inputBuf;
@@ -747,7 +756,7 @@ void streamFromHermes(String prompt) {
   
   // Build JSON with conversation history
   JsonDocument doc;
-  doc["model"] = "cardputer-chat";
+  doc["model"] = "hermes-agent";
   doc["stream"] = true;
   JsonArray msgs = doc.createNestedArray("messages");
   
@@ -1381,20 +1390,6 @@ void handleKeyboard() {
     
     // ===== SHORT PRESS (new key-down) =====
     if (isNew && !newActive[i].consumed) {
-      if (appMode == MODE_BROWSER) {
-        handleBrowserKeys(key, state.fn);
-        newActive[i].consumed = true;
-        continue;
-      } else if (appMode == MODE_EDITOR) {
-        handleEditorKeys(key, state.fn);
-        newActive[i].consumed = true;
-        continue;
-      } else if (appMode == MODE_BROWSER_INPUT) {
-        handleBrowserInputKeys(key, state.fn);
-        newActive[i].consumed = true;
-        continue;
-      }
-      
       // Fn combos — always active even when busy
       if (state.fn) {
         if (key == ';') { scrollUp(3); newActive[i].consumed = true; continue; }
@@ -1436,6 +1431,15 @@ void handleKeyboard() {
         histIdx = -1;  // Any edit breaks history navigation
         newActive[i].consumed = true;
       } else if (key == KEY_ENTER) {
+        // Portal mode: Enter returns to chat
+        if (portalActive) {
+          portalActive = false;
+          addToChat("SYS: Web Portal — back to chat");
+          addToChat("SYS: Portal still accessible at http://" + portalIP);
+          redrawAll();
+          newActive[i].consumed = true;
+          continue;
+        }
         if (inputBuf.length() > 0) {
           String toSend = inputBuf;
           toSend.trim();
@@ -1443,7 +1447,19 @@ void handleKeyboard() {
           inputBuf = "";
           drawInputBar();
           
-          if (toSend == "/clear") {
+          if (toSend == "/help") {
+            addToChat("--- Commands ---");
+            addToChat("/help   Show this list");
+            addToChat("/clear  Clear chat");
+            addToChat("/voice  Toggle voice mode");
+            addToChat("/files  Web portal (SD card)");
+            addToChat("/ir CMD Send IR command");
+            addToChat("---");
+            addToChat("Fn+; Scroll up  Fn+. Scroll down");
+            addToChat("Fn+BS Clear chat  Fn+Enter Reset");
+            addToChat("Fn+` History up  Fn+Tab History down");
+            drawChat();
+          } else if (toSend == "/clear") {
             clearChat();
           } else if (toSend == "/voice") {
             voiceMode = !voiceMode;
@@ -1451,7 +1467,19 @@ void handleKeyboard() {
             drawStatusBar();
             drawChat();
           } else if (toSend == "/files") {
-            enterBrowser();
+            if (!portalActive) {
+              portalIP = WiFi.localIP().toString();
+              portalActive = true;
+              addToChat("SYS: Web Portal → http://" + portalIP);
+              addToChat("SYS: Press ENTER to return to chat");
+              // Show folder icon screen
+              M5Cardputer.Display.fillScreen(BLACK);
+              drawStatusBar();
+              drawPortalScreen();
+            } else {
+              addToChat("SYS: Portal already active at http://" + portalIP);
+            }
+            drawChat();
           } else if (toSend.startsWith("/ir ")) {
             String irCmd = toSend.substring(4);
             addToChat("SYS: IR TX -> " + irCmd + " (Pin 44)");
@@ -1503,63 +1531,92 @@ void handleKeyboard() {
 
 void bootAnimation() {
   M5Cardputer.Display.fillScreen(BLACK);
-  
-  int cx = SCREEN_W / 2;
-  int cy = SCREEN_H / 2;
-  
-  // Phase 1: Expanding circle reveal (200ms)
-  for (int r = 0; r < 140; r += 7) {
-    M5Cardputer.Display.drawCircle(cx, cy, r, 0x07FF);  // Cyan
-    delay(8);
+
+  // Caduceus center — staff is vertical, wings spread horizontally
+  int cx = 120;   // horizontal center of 240px display
+  int topY = 25;  // top of staff
+  int botY = 100; // bottom of staff
+
+  // Phase 1: Staff draws downward (~400ms)
+  // Single vertical line — the asclepian rod
+  for (int y = topY; y <= botY; y++) {
+    M5Cardputer.Display.drawPixel(cx, y, 0x07FF);  // Cyan
+    delay(5);
   }
-  delay(100);
-  M5Cardputer.Display.fillScreen(BLACK);
-  
-  // Phase 2: "HERMES" text with typing effect
+
+  // Phase 2: Two serpents wind upward (~600ms)
+  // Sinusoidal S-curves wrapping 2.5 times around the staff
+  int prevX1 = cx, prevY1 = botY;
+  int prevX2 = cx, prevY2 = botY;
+  for (int i = 0; i <= 60; i++) {
+    float t = (float)i / 60.0f;
+    int y = botY - (int)(t * (botY - topY));
+    // 2.5 full windings = 5π radians
+    float wave1 = sin(t * 5.0f * PI) * 12.0f;
+    float wave2 = sin(t * 5.0f * PI + PI) * 12.0f;  // 180° out of phase
+
+    int x1 = cx + (int)wave1;
+    int x2 = cx + (int)wave2;
+
+    if (i > 0) {
+      M5Cardputer.Display.drawLine(prevX1, prevY1, x1, y, 0x07FF);
+      M5Cardputer.Display.drawLine(prevX2, prevY2, x2, y, 0x041F);  // Deep blue
+    }
+    prevX1 = x1; prevY1 = y;
+    prevX2 = x2; prevY2 = y;
+    delay(10);
+  }
+
+  // Phase 3: Wings fan outward from staff top (~300ms)
+  // Three line segments per side, spreading upward like feathers
+  int wy = topY + 12;
+  for (int i = 0; i < 3; i++) {
+    int spread = (i + 1) * 10;
+    int dy = i * 4;
+    // Right wing
+    M5Cardputer.Display.drawLine(cx + 2, wy, cx + spread + 8, wy - 8 - dy, 0x07FF);
+    // Left wing
+    M5Cardputer.Display.drawLine(cx - 2, wy, cx - spread - 8, wy - 8 - dy, 0x07FF);
+    delay(100);
+  }
+
+  delay(200);
+
+  // Phase 4: "HERMES" typewriter effect
   M5Cardputer.Display.setTextSize(2);
   M5Cardputer.Display.setTextColor(0x07FF);  // Cyan
   M5Cardputer.Display.setCursor(72, 30);
-  
+
   String title = "HERMES";
   for (int i = 0; i < (int)title.length(); i++) {
     M5Cardputer.Display.print(title[i]);
     delay(60);
   }
-  
-  // Phase 3: Subtitle with fade-in effect (draw/dim alternate)
+
+  // Phase 5: Subtitle with pulse effect
   M5Cardputer.Display.setTextSize(1);
   for (int pass = 0; pass < 3; pass++) {
-    M5Cardputer.Display.setTextColor(pass % 2 == 0 ? 0x8410 : 0x4208);  // Gray pulse
-    M5Cardputer.Display.setCursor(66, 58);
-    M5Cardputer.Display.print("Cardputer Chat v2.6");
+    M5Cardputer.Display.setTextColor(pass % 2 == 0 ? 0x8410 : 0x4208);
+    M5Cardputer.Display.setCursor(58, 58);
+    M5Cardputer.Display.print("Cardputer Chat v0.2.3");
     delay(150);
   }
   M5Cardputer.Display.setTextColor(0x8410);
-  M5Cardputer.Display.setCursor(66, 58);
-  M5Cardputer.Display.print("Cardputer Chat v2.6");
-  
-  // Phase 4: Scanning line animation
-  for (int y = 75; y < 90; y++) {
-    M5Cardputer.Display.drawLine(30, y, 210, y, 0x07FF);
-    delay(15);
-  }
-  for (int y = 75; y < 90; y++) {
-    M5Cardputer.Display.drawLine(30, y, 210, y, BLACK);
-    delay(8);
-  }
-  
-  // Phase 5: Progress bar
+  M5Cardputer.Display.setCursor(58, 58);
+  M5Cardputer.Display.print("Cardputer Chat v0.2.3");
+
+  // Phase 6: Progress bar
   M5Cardputer.Display.drawRect(30, 80, 180, 8, 0x4208);
   for (int x = 0; x < 178; x += 3) {
     M5Cardputer.Display.fillRect(31, 81, x, 6, 0x07FF);
     delay(12);
   }
-  
-  // Phase 6: Status text
+
+  // Phase 7: Status text
   M5Cardputer.Display.setTextColor(0x07E0);  // Green
   M5Cardputer.Display.setCursor(70, 100);
   M5Cardputer.Display.print("Booting...");
-  
+
   delay(300);
   M5Cardputer.Display.fillScreen(BLACK);
 }
@@ -1716,15 +1773,23 @@ void setup() {
       }
     });
     
+    // 3) Web Portal — file manager at /
+    otaServer.on("/", HTTP_GET, handlePortalRoot);
+    otaServer.on("/api/files", HTTP_GET, handleApiFiles);
+    otaServer.on("/api/read", HTTP_GET, handleApiRead);
+    otaServer.on("/api/write", HTTP_POST, handleApiWrite);
+    otaServer.on("/api/delete", HTTP_POST, handleApiDelete);
+    
     otaServer.begin();
     Serial.println("HTTP OTA ready at: http://cardputer.local/update");
+    Serial.println("Web Portal ready at: http://cardputer.local/");
   }
 }
 
 void loop() {
-  // OTA handlers — must run every cycle
+  // OTA + Web Portal handlers
   ArduinoOTA.handle();
-  otaServer.handleClient();
+  otaServer.handleClient();  // Always on for HTTP OTA /update endpoint
   
   // Call components separately to avoid M5Cardputer.update()'s ~2s overhead
   // (it processes IMU, power, speaker, mic, touch every cycle)
@@ -1733,13 +1798,6 @@ void loop() {
   M5Cardputer.Keyboard.updateKeysState();         // Process into keysState
   handleKeyboard();
 
-  if (appMode == MODE_BROWSER_INPUT) {
-    drawBrowserPrompt();
-    return;
-  }
-  
-  if (appMode != MODE_CHAT) return;
-  
   // Phase 2: G0 Button via direct GPIO 0 (bypasses M5Unified update conflicts)
   static bool g0Last = true;  // pulled high = not pressed
   static unsigned long g0Debounce = 0;
@@ -1870,5 +1928,445 @@ void loop() {
     } else if (cmd == "test") {
       streamFromHermes("Hello from Cardputer");
     }
+  }
+}
+
+// Draw portal active screen — folder icon + IP + instructions
+void drawPortalScreen() {
+  int cx = SCREEN_W / 2;
+  int cy = (SCREEN_H - STATUS_H) / 2 + STATUS_H;
+  
+  // Folder icon (pixel art, cyan)
+  uint16_t col = 0x07FF;  // Cyan
+  int fx = cx - 24;
+  int fy = cy - 28;
+  
+  // Folder tab
+  M5Cardputer.Display.fillRect(fx, fy, 18, 6, col);
+  // Folder body
+  M5Cardputer.Display.fillRect(fx, fy + 6, 48, 30, col);
+  // Folder inner (dark)
+  M5Cardputer.Display.fillRect(fx + 2, fy + 8, 44, 26, 0x0820);
+  
+  // WiFi waves (right side of folder)
+  int wx = fx + 54;
+  int wy = fy + 10;
+  M5Cardputer.Display.drawArc(wx, wy, 6, 6, 225, 315, 0x07FF);
+  M5Cardputer.Display.drawArc(wx, wy, 12, 12, 225, 315, 0x07FF);
+  M5Cardputer.Display.drawArc(wx, wy, 18, 18, 225, 315, 0x07FF);
+  // Dot
+  M5Cardputer.Display.fillCircle(wx, wy + 22, 3, 0x07FF);
+  
+  // IP address
+  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setTextColor(0x07FF);
+  String url = "http://" + portalIP + "/";
+  int tw = url.length() * 6;
+  M5Cardputer.Display.setCursor(cx - tw / 2, cy + 16);
+  M5Cardputer.Display.print(url);
+  
+  // Instructions
+  M5Cardputer.Display.setTextColor(0x4208);
+  String hint = "[ENTER] Stop Portal";
+  tw = hint.length() * 6;
+  M5Cardputer.Display.setCursor(cx - tw / 2, cy + 30);
+  M5Cardputer.Display.print(hint);
+}
+
+// ============================================================
+// WEB PORTAL — File Manager (replaces on-device browser/editor)
+// ============================================================
+
+// Embedded HTML for the file manager portal
+const char PORTAL_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hermes SD Card</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.4 monospace;background:#0a1628;color:#b0e0e6;display:flex;height:100vh}
+#sidebar{width:260px;background:#0d1f3c;border-right:1px solid #1a3a5c;display:flex;flex-direction:column;flex-shrink:0}
+#sidebar h2{padding:12px 16px;color:#00e5ff;font-size:15px;border-bottom:1px solid #1a3a5c}
+#filelist{flex:1;overflow-y:auto;padding:4px 0}
+.file{padding:5px 16px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+.file:hover{background:#1a3a5c}
+.file.active{background:#0e3a5e;color:#00e5ff}
+.file.dir{color:#4dd0e1}
+.actions{padding:8px;border-top:1px solid #1a3a5c}
+.actions button{background:#0e4a6e;color:#b0e0e6;border:1px solid #1a5a7e;padding:5px 10px;cursor:pointer;font:12px monospace;margin:2px;border-radius:3px}
+.actions button:hover{background:#1a6a8e}
+#editor{flex:1;display:flex;flex-direction:column}
+#toolbar{padding:8px 12px;background:#0d1f3c;border-bottom:1px solid #1a3a5c;display:flex;align-items:center;gap:8px}
+#toolbar .path{color:#4dd0e1;font-size:13px;flex:1}
+#toolbar button{background:#0e4a6e;color:#b0e0e6;border:1px solid #1a5a7e;padding:5px 12px;cursor:pointer;font:12px monospace;border-radius:3px}
+#toolbar button:hover{background:#1a6a8e}
+#toolbar button.save{background:#0e5a3e;border-color:#1a7a5e}
+#toolbar button.save:hover{background:#1a7a5e}
+#toolbar button.del{background:#5a0e0e;border-color:#7a1a1a}
+#toolbar button.del:hover{background:#7a1a1a}
+#content{flex:1;display:flex}
+#linenos{width:40px;background:#0a1628;color:#3a5a7c;text-align:right;padding:8px 6px;font-size:13px;line-height:1.5;overflow:hidden;user-select:none}
+textarea{flex:1;background:#0a1628;color:#b0e0e6;border:none;padding:8px;font:13px/1.5 monospace;resize:none;outline:none;tab-size:2}
+#status{padding:6px 12px;background:#0d1f3c;border-top:1px solid #1a3a5c;font-size:12px;color:#3a7a5c}
+#newdlg{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#0d1f3c;border:1px solid #1a5a7e;padding:20px;border-radius:6px;z-index:10}
+#newdlg input{background:#0a1628;color:#b0e0e6;border:1px solid #1a3a5c;padding:6px;font:13px monospace;width:250px;outline:none}
+#newdlg button{margin-top:8px;background:#0e4a6e;color:#b0e0e6;border:1px solid #1a5a7e;padding:5px 12px;cursor:pointer;font:12px monospace;border-radius:3px}
+#overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9}
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <h2>SD Card</h2>
+  <div id="filelist"></div>
+  <div class="actions">
+    <button onclick="showNew()">+ New File</button>
+    <button onclick="loadFiles()">Refresh</button>
+  </div>
+</div>
+<div id="editor">
+  <div id="toolbar">
+    <span class="path" id="filepath">Select a file</span>
+    <button class="save" onclick="saveFile()">Save</button>
+    <button class="del" onclick="deleteFile()">Delete</button>
+  </div>
+  <div id="content">
+    <div id="linenos"></div>
+    <textarea id="ta" onscroll="syncLines()" oninput="updateLines()" placeholder="Select a file from the list..."></textarea>
+  </div>
+  <div id="status">Ready</div>
+</div>
+<div id="overlay" onclick="hideNew()"></div>
+<div id="newdlg">
+  <div style="color:#00e5ff;margin-bottom:8px">New filename:</div>
+  <input id="newname" placeholder="config.json" onkeydown="if(event.key==='Enter')createFile()">
+  <br><button onclick="createFile()">Create</button>
+</div>
+<script>
+let currentPath='';
+const ta=document.getElementById('ta');
+const fl=document.getElementById('filelist');
+const fp=document.getElementById('filepath');
+const st=document.getElementById('status');
+const ln=document.getElementById('linenos');
+
+function status(m,c){st.textContent=m;st.style.color=c||'#3a7a5c'}
+
+async function loadFiles(){
+  try{
+    const r=await fetch('/api/files');
+    const d=await r.json();
+    fl.innerHTML='';
+    d.forEach(f=>{
+      const el=document.createElement('div');
+      el.className='file'+(f.dir?' dir':'');
+      el.textContent=(f.dir?'\u{1F4C1} ':'\u{1F4C4} ')+f.name;
+      if(!f.dir) el.onclick=()=>loadFile(f.path);
+      fl.appendChild(el);
+    });
+    status('Files loaded');
+  }catch(e){status('Error: '+e.message,'#e53935')}
+}
+
+async function loadFile(path){
+  try{
+    const r=await fetch('/api/read?path='+encodeURIComponent(path));
+    const d=await r.json();
+    if(d.error){status(d.error,'#e53935');return}
+    currentPath=path;
+    fp.textContent=path;
+    ta.value=d.content;
+    updateLines();
+    status('Loaded: '+path);
+  }catch(e){status('Error: '+e.message,'#e53935')}
+}
+
+async function saveFile(){
+  if(!currentPath){status('No file selected','#e53935');return}
+  try{
+    const r=await fetch('/api/write',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:currentPath,content:ta.value})
+    });
+    const d=await r.json();
+    status(d.ok?'Saved: '+currentPath:(d.error||'Save failed'),d.ok?'#3a7a5c':'#e53935');
+  }catch(e){status('Error: '+e.message,'#e53935')}
+}
+
+async function deleteFile(){
+  if(!currentPath){status('No file selected','#e53935');return}
+  if(!confirm('Delete '+currentPath+'?'))return;
+  try{
+    const r=await fetch('/api/delete',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:currentPath})
+    });
+    const d=await r.json();
+    if(d.ok){
+      status('Deleted: '+currentPath);
+      currentPath='';fp.textContent='Select a file';ta.value='';updateLines();
+      loadFiles();
+    }else{status(d.error||'Delete failed','#e53935')}
+  }catch(e){status('Error: '+e.message,'#e53935')}
+}
+
+function showNew(){document.getElementById('overlay').style.display='block';document.getElementById('newdlg').style.display='block';document.getElementById('newname').focus()}
+function hideNew(){document.getElementById('overlay').style.display='none';document.getElementById('newdlg').style.display='none'}
+
+async function createFile(){
+  const n=document.getElementById('newname').value.trim();
+  if(!n)return;
+  hideNew();
+  try{
+    const r=await fetch('/api/write',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:'/'+n,content:''})
+    });
+    const d=await r.json();
+    if(d.ok){loadFiles();loadFile('/'+n)}
+    else{status(d.error||'Create failed','#e53935')}
+  }catch(e){status('Error: '+e.message,'#e53935')}
+}
+
+function updateLines(){
+  const lines=ta.value.split('\n');
+  ln.innerHTML=lines.map((_,i)=>'<div>'+(i+1)+'</div>').join('');
+}
+
+function syncLines(){
+  ln.scrollTop=ta.scrollTop;
+}
+
+ta.addEventListener('keydown',function(e){
+  if(e.key==='Tab'){
+    e.preventDefault();
+    const s=this.selectionStart,en=this.selectionEnd;
+    this.value=this.value.substring(0,s)+'  '+this.value.substring(en);
+    this.selectionStart=this.selectionEnd=s+2;
+    updateLines();
+  }
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){
+    e.preventDefault();saveFile();
+  }
+});
+
+loadFiles();
+</script>
+</body>
+</html>
+)rawliteral";
+
+// Serve the portal page
+void handlePortalRoot() {
+  if (!portalActive) { otaServer.send(403, "text/plain", "Portal not active. Type /files on device."); return; }
+  otaServer.send_P(200, "text/html", PORTAL_HTML);
+}
+
+// List files on SD card as JSON
+void handleApiFiles() {
+  if (!portalActive) { otaServer.send(403, "application/json", "{\"error\":\"Portal not active\"}"); return; }
+  if (!sdMounted) {
+    otaServer.send(500, "application/json", "{\"error\":\"SD not mounted\"}");
+    return;
+  }
+  
+  String path = otaServer.hasArg("path") ? otaServer.arg("path") : "/";
+  File dir = SD.open(path);
+  if (!dir || !dir.isDirectory()) {
+    otaServer.send(400, "application/json", "{\"error\":\"Not a directory\"}");
+    return;
+  }
+  
+  String json = "[";
+  bool first = true;
+  File entry = dir.openNextFile();
+  while (entry) {
+    if (!first) json += ",";
+    first = false;
+    String name = String(entry.name());
+    if (name.startsWith("/")) name = name.substring(1);
+    int slash = name.lastIndexOf('/');
+    if (slash >= 0) name = name.substring(slash + 1);
+    json += "{\"name\":\"" + name + "\",\"dir\":" + (entry.isDirectory() ? "true" : "false");
+    String entryPath = String(entry.name());
+    if (!entryPath.startsWith("/")) entryPath = "/" + entryPath;
+    json += ",\"path\":\"" + entryPath + "\"}";
+    entry.close();
+    entry = dir.openNextFile();
+  }
+  dir.close();
+  json += "]";
+  
+  otaServer.send(200, "application/json", json);
+}
+
+// Read a file from SD card
+void handleApiRead() {
+  if (!portalActive) { otaServer.send(403, "application/json", "{\"error\":\"Portal not active\"}"); return; }
+  if (!sdMounted) {
+    otaServer.send(500, "application/json", "{\"error\":\"SD not mounted\"}");
+    return;
+  }
+  if (!otaServer.hasArg("path")) {
+    otaServer.send(400, "application/json", "{\"error\":\"Missing path\"}");
+    return;
+  }
+  
+  String path = otaServer.arg("path");
+  if (!path.startsWith("/")) path = "/" + path;
+  File file = SD.open(path);
+  if (!file) {
+    otaServer.send(404, "application/json", "{\"error\":\"File not found\"}");
+    return;
+  }
+  
+  String content = "";
+  while (file.available()) {
+    content += (char)file.read();
+  }
+  file.close();
+  
+  // Escape JSON special chars
+  String escaped = "";
+  for (unsigned int i = 0; i < content.length(); i++) {
+    char c = content[i];
+    if (c == '"') escaped += "\\\"";
+    else if (c == '\\') escaped += "\\\\";
+    else if (c == '\n') escaped += "\\n";
+    else if (c == '\r') escaped += "\\r";
+    else if (c == '\t') escaped += "\\t";
+    else escaped += c;
+  }
+  
+  otaServer.send(200, "application/json", "{\"content\":\"" + escaped + "\"}");
+}
+
+// Write a file to SD card
+void handleApiWrite() {
+  if (!portalActive) { otaServer.send(403, "application/json", "{\"error\":\"Portal not active\"}"); return; }
+  if (!sdMounted) {
+    otaServer.send(500, "application/json", "{\"error\":\"SD not mounted\"}");
+    return;
+  }
+  
+  String body = otaServer.arg("plain");
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    otaServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  
+  String path = doc["path"].as<String>();
+  if (!path.startsWith("/")) path = "/" + path;
+  String content = doc["content"].as<String>();
+  
+  if (path.length() == 0) {
+    otaServer.send(400, "application/json", "{\"error\":\"Missing path\"}");
+    return;
+  }
+  
+  SD.remove(path);
+  File file = SD.open(path, FILE_WRITE);
+  if (!file) {
+    otaServer.send(500, "application/json", "{\"error\":\"Cannot write\"}");
+    return;
+  }
+  
+  file.print(content);
+  file.close();
+  
+  otaServer.send(200, "application/json", "{\"ok\":true}");
+  addToChat("SYS: Web saved " + path);
+  
+  // Auto-reload config.json
+  if (path.endsWith("config.json")) {
+    File cfg = SD.open(path);
+    if (cfg) {
+      JsonDocument cfgDoc;
+      if (!deserializeJson(cfgDoc, cfg)) {
+        if (cfgDoc.containsKey("ssid")) ssid = cfgDoc["ssid"].as<String>();
+        if (cfgDoc.containsKey("password")) password = cfgDoc["password"].as<String>();
+        if (cfgDoc.containsKey("apiKey")) apiKey = cfgDoc["apiKey"].as<String>();
+        if (cfgDoc.containsKey("host")) host = cfgDoc["host"].as<String>();
+        if (cfgDoc.containsKey("port")) port = cfgDoc["port"].as<int>();
+        if (cfgDoc.containsKey("sttKey")) sttKey = cfgDoc["sttKey"].as<String>();
+        if (cfgDoc.containsKey("ttsKey")) ttsKey = cfgDoc["ttsKey"].as<String>();
+        addToChat("SYS: Config reloaded");
+      }
+      cfg.close();
+    }
+  }
+  drawChat();
+}
+
+// Delete a file from SD card
+void handleApiDelete() {
+  if (!portalActive) { otaServer.send(403, "application/json", "{\"error\":\"Portal not active\"}"); return; }
+  if (!sdMounted) {
+    otaServer.send(500, "application/json", "{\"error\":\"SD not mounted\"}");
+    return;
+  }
+  
+  String body = otaServer.arg("plain");
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    otaServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  
+  String path = doc["path"].as<String>();
+  if (path.length() == 0) {
+    otaServer.send(400, "application/json", "{\"error\":\"Missing path\"}");
+    return;
+  }
+  
+  if (!SD.exists(path)) {
+    otaServer.send(404, "application/json", "{\"error\":\"File not found\"}");
+    return;
+  }
+  
+  SD.remove(path);
+  otaServer.send(200, "application/json", "{\"ok\":true}");
+  addToChat("SYS: Web deleted " + path);
+  drawChat();
+}
+
+// Map unshifted key to shifted equivalent// Map unshifted key to shifted equivalent when Aa (shift) is active.
+// The Cardputer keyboard returns base chars from getKey(); we apply
+// the shift layer manually to get symbols like *, @, #, etc.
+uint8_t getShiftedChar(uint8_t key) {
+  switch (key) {
+    case '`': return '~';
+    case '1': return '!';
+    case '2': return '@';
+    case '3': return '#';
+    case '4': return '$';
+    case '5': return '%';
+    case '6': return '^';
+    case '7': return '&';
+    case '8': return '*';
+    case '9': return '(';
+    case '0': return ')';
+    case '-': return '_';
+    case '=': return '+';
+    case '[': return '{';
+    case ']': return '}';
+    case '\\': return '|';
+    case ';': return ':';
+    case '\'': return '"';
+    case ',': return '<';
+    case '.': return '>';
+    case '/': return '?';
+    // Uppercase letters
+    default:
+      if (key >= 'a' && key <= 'z') return key - 32;
+      return key;  // No shift mapping — return as-is
   }
 }

@@ -2,7 +2,7 @@
 
 WiFi chat terminal for OpenAI-compatible API servers. Runs on M5Stack Cardputer (ESP32-S3).
 
-![Firmware](https://img.shields.io/badge/firmware-v2.6--ota-blue)
+![Firmware](https://img.shields.io/badge/firmware-v0.2.3-blue)
 ![Board](https://img.shields.io/badge/board-M5Stack%20Cardputer-green)
 ![Arduino](https://img.shields.io/badge/arduino-ESP32%20S3-orange)
 
@@ -24,7 +24,7 @@ A pocket-sized WiFi chat terminal that connects to any OpenAI-compatible API ser
 - **Smart keyboard** — short/long press, key repeat, Fn combos
 - **Conversation context** — last 10 exchanges for multi-turn chat
 - **Voice mode** — STT (Deepgram) + TTS (ElevenLabs)
-- **File browser** — SD card file management + editor
+- **Web portal** — SD card file management via browser
 - **Auto-reconnect** — WiFi drop recovery
 
 ## Quick Start
@@ -67,6 +67,18 @@ curl -F "file=@build/cardputer_chat_wifi.ino.bin" http://<CARDPUTER_IP>/update
 
 Device auto-reboots. ~8 seconds for 1.3MB.
 
+### 4. Update via M5 Launcher (Alternative)
+
+If using [M5 Launcher](https://github.com/bmorcelli/Launcher), add this to your `config.conf` favorites:
+
+```json
+{
+  "name": "Cardputer-Chat",
+  "fid": "",
+  "link": "https://github.com/jesus359/hermes-cardputer/releases/latest/download/cardputer_chat_wifi.ino.bin"
+}
+```
+
 ## Controls
 
 | Key | Action |
@@ -82,9 +94,11 @@ Device auto-reboots. ~8 seconds for 1.3MB.
 | Fn + Enter | Full reset |
 | Fn + Up (`) | Input history up |
 | Fn + Down (Tab) | Input history down |
-| /clear | Clear chat command |
+| /help | Show commands |
+| /clear | Clear chat |
 | /voice | Toggle voice mode |
-| /files | File browser |
+| /files | Open web portal (shows URL) |
+| /update | Check firmware version |
 
 ## Project Structure
 
@@ -98,7 +112,8 @@ Device auto-reboots. ~8 seconds for 1.3MB.
 └── firmware/
     ├── README.md
     └── cardputer_chat_wifi/
-        └── cardputer_chat_wifi.ino
+        ├── cardputer_chat_wifi.ino
+        └── config.json.example
 ```
 
 ## Documentation
@@ -112,6 +127,9 @@ Device auto-reboots. ~8 seconds for 1.3MB.
 - M5Stack Cardputer (ESP32-S3)
 - WiFi network (2.4GHz)
 - OpenAI-compatible API server (Ollama, LM Studio, vLLM, etc.)
+- Optional: SD card (config persistence, web portal)
+- Optional: Deepgram API key (voice STT)
+- Optional: ElevenLabs API key (voice TTS)
 
 ## License
 
