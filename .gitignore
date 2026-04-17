@@ -1,0 +1,20 @@
+# Build artifacts
+firmware/*/build/
+*.bin
+*.elf
+*.map
+*.partitions
+
+# Config with secrets
+config.json
+
+# macOS
+.DS_Store
+._*
+
+# IDE
+.vscode/
+.idea/
+
+# Obsidian
+.obsidian/

@@ -1,0 +1,9 @@
+{
+  "ssid": "YOUR_WIFI_SSID",
+  "password": "YOUR_WIFI_PASSWORD",
+  "apiKey": "YOUR_API_KEY",
+  "host": "YOUR_API_SERVER_IP",
+  "port": 11434,
+  "sttKey": "",
+  "ttsKey": ""
+}
