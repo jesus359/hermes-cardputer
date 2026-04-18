@@ -1,4 +1,4 @@
-# Cardputer-Chat
+# Hermes-Cardputer
 
 WiFi chat terminal for OpenAI-compatible API servers. Runs on M5Stack Cardputer (ESP32-S3).
 
@@ -73,7 +73,7 @@ If using [M5 Launcher](https://github.com/bmorcelli/Launcher), add this to your 
 
 ```json
 {
-  "name": "Cardputer-Chat",
+  "name": "Hermes-Cardputer",
   "fid": "",
   "link": "https://github.com/jesus359/hermes-cardputer/releases/latest/download/cardputer_chat_wifi.ino.bin"
 }

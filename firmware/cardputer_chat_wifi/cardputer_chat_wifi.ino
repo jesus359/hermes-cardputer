@@ -1,5 +1,5 @@
 /*
- * Cardputer-Hermes Chat v0.2.3 (WiFi - Full Featured)
+ * Hermes-Cardputer v0.2.3 (WiFi - Full Featured)
  * 
  * Features:
  * - Streaming responses (chunked HTTP)

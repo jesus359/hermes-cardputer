@@ -1,6 +1,6 @@
 # Firmware
 
-Cardputer-Chat WiFi chat firmware for M5Stack Cardputer (ESP32-S3).
+Hermes-Cardputer WiFi chat firmware for M5Stack Cardputer (ESP32-S3).
 
 ## Active Firmware
 
