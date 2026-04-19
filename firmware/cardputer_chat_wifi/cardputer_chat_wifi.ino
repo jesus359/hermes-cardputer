@@ -51,8 +51,7 @@ const char* github_ca = "-----BEGIN CERTIFICATE-----\n"
 " pLiaWN0bfVKfjllDiIGknibVb63dDcY3fe0Dkhvld1927jyNxF1WW6LZZm6zNTfl\n"
 " MrY=\n"
 " -----END CERTIFICATE-----\n"
-";
-";
+;
 
 // ==================== SETTINGS (overridden by /config.json on SD) ===========
 String ssid     = "";
