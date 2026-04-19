@@ -22,6 +22,7 @@
 
 ### Fixed
 - System message color inconsistency (green → cyan per theme)
+- Stray string literal after `github_ca` certificate block caused compile error
 
 ### Removed
 - Dead `AppMode` enum and `appMode` variable (only MODE_CHAT, never used)
