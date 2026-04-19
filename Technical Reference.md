@@ -11,7 +11,7 @@
 
 ---
 
-## Firmware: cardputer_chat_wifi v0.2.3
+## Firmware: cardputer_chat_wifi v0.2.4
 
 ### Configuration
 

@@ -4,7 +4,7 @@ Hermes-Cardputer WiFi chat firmware for M5Stack Cardputer (ESP32-S3).
 
 ## Active Firmware
 
-- **cardputer_chat_wifi/** — v0.2.3
+- **cardputer_chat_wifi/** — v0.2.4
   - `cardputer_chat_wifi.ino` — source (single file, ~2300 lines)
   - `config.json.example` — SD card config template
 

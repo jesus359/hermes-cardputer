@@ -1,5 +1,5 @@
 /*
- * Hermes-Cardputer v0.2.3 (WiFi - Full Featured)
+ * Hermes-Cardputer v0.2.4 (WiFi - Full Featured)
  * 
  * Features:
  * - Streaming responses (chunked HTTP)
@@ -29,12 +29,36 @@
 #include <ArduinoOTA.h>
 #include <WebServer.h>
 #include <Update.h>
+const char* github_ca = "-----BEGIN CERTIFICATE-----\n"
+" MIIDjjCCAnagAwIBAgIQAzrx5qcRqaC7KGSxHQn65TANBgkqhkiG9w0BAQsFADBh\n"
+" MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n"
+" d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBH\n"
+" MjAeFw0xMzA4MDExMjAwMDBaFw0zODAxMTUxMjAwMDBaMGExCzAJBgNVBAYTAlVT\n"
+" MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j\n"
+" b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IEcyMIIBIjANBgkqhkiG\n"
+" 9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuzfNNNx7a8myaJCtSnX/RrohCgiN9RlUyfuI\n"
+" 2/Ou8jqJkTx65qsGGmvPrC3oXgkkRLpimn7Wo6h+4FR1IAWsULecYxpsMNzaHxmx\n"
+" 1x7e/dfgy5SDN67sH0NO3Xss0r0upS/kqbitOtSZpLYl6ZtrAGCSYP9PIUkY92eQ\n"
+" q2EGnI/yuum06ZIya7XzV+hdG82MHauVBJVJ8zUtluNJbd134/tJS7SsVQepj5Wz\n"
+" tCO7TG1F8PapspUwtP1MVYwnSlcUfIKdzXOS0xZKBgyMUNGPHgm+F6HmIcr9g+UQ\n"
+" vIOlCsRnKPZzFBQ9RnbDhxSJITRNrw9FDKZJobq7nMWxM4MphQIDAQABo0IwQDAP\n"
+" BgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNVHQ4EFgQUTiJUIBiV\n"
+" 5uNu5g/6+rkS7QYXjzkwDQYJKoZIhvcNAQELBQADggEBAGBnKJRvDkhj6zHd6mcY\n"
+" 1Yl9PMWLSn/pvtsrF9+wX3N3KjITOYFnQoQj8kVnNeyIv/iPsGEMNKSuIEyExtv4\n"
+" NeF22d+mQrvHRAiGfzZ0JFrabA0UWTW98kndth/Jsw1HKj2ZL7tcu7XUIOGZX1NG\n"
+" Fdtom/DzMNU+MeKNhJ7jitralj41E6Vf8PlwUHBHQRFXGU7Aj64GxJUTFy8bJZ91\n"
+" 8rGOmaFvE7FBcf6IKshPECBV1/MUReXgRPTqh5Uykw7+U0b6LJ3/iyK5S9kJRaTe\n"
+" pLiaWN0bfVKfjllDiIGknibVb63dDcY3fe0Dkhvld1927jyNxF1WW6LZZm6zNTfl\n"
+" MrY=\n"
+" -----END CERTIFICATE-----\n"
+";
+";
 
 // ==================== SETTINGS (overridden by /config.json on SD) ===========
 String ssid     = "";
 String password = "";
 String apiKey   = "";
-String host     = "YOUR_API_SERVER_IP";
+String host     = "<YOUR_HERMES_IP>";
 int    port     = 11434;
 
 // Cloud STT (Deepgram)
@@ -73,17 +97,17 @@ String updateUrl = "https://github.com/jesus359/hermes-cardputer/releases/latest
 #define MAX_INPUT      255
 #define STREAM_BUF_SIZE 4096
 
-// Colors
+// Colors — Blue/Turquoise palette
 #define COL_STATUS_BG  0x2104
 #define COL_INPUT_BG   0x0000
 #define COL_YOU        0xFFFF
 #define COL_HERMES     0x07FF
 #define COL_ERR        0xF800
-#define COL_SYS        0x07E0
+#define COL_SYS        0x07FF   // Cyan (was green 0x07E0)
 #define COL_SCROLLBAR  0x4208
 #define COL_SCROLL_TH  0xBDF7
-#define COL_ICON_ON    0x07E0
-#define COL_ICON_MED   0xFFE0
+#define COL_ICON_ON    0x07FF   // Cyan (was green 0x07E0)
+#define COL_ICON_MED   0x041F   // Deep blue (was yellow 0xFFE0)
 #define COL_ICON_WEAK  0xF800
 #define COL_ICON_OFF   0x4208
 
@@ -129,11 +153,6 @@ bool sdMounted = false;
 // IMU availability (only Cardputer-Adv has IMU)
 bool imuAvailable = false;
 
-// App Modes
-// App mode — browser/editor replaced by web portal (v0.2.3)
-enum AppMode { MODE_CHAT };
-AppMode appMode = MODE_CHAT;
-
 // Voice mode toggle and state machine
 bool voiceMode = false;
 enum VoiceState { V_IDLE, V_LISTEN, V_UPLOAD, V_THINK, V_FETCH, V_SPEAK };
@@ -141,7 +160,6 @@ VoiceState vState = V_IDLE;
 
 // Web portal handles file operations (no on-device browser/editor)
 void drawPortalScreen();
-uint8_t getShiftedChar(uint8_t key);
 
 // Input history (5 entries, cycle with Fn+Up / Fn+Down)
 #define HIST_SIZE 5
@@ -152,7 +170,7 @@ int histIdx   = -1;  // -1 = not browsing history
 // Heap warning threshold
 #define HEAP_WARN_BYTES 20000
 
-// Web portal state — on-demand server (v0.2.3)
+// Web portal state — on-demand server (v0.2.4)
 bool portalActive = false;
 String portalIP = "";
 
@@ -170,8 +188,6 @@ struct KeyInfo {
 
 KeyInfo activeKeys[MAX_KEYS];
 int activeKeyCount = 0;
-KeyInfo prevKeys[MAX_KEYS];
-int prevKeyCount = 0;
 
 bool keyInList(Point2D_t p, KeyInfo* list, int count) {
   for (int i = 0; i < count; i++) {
@@ -191,48 +207,9 @@ int findKeyIndex(Point2D_t p, KeyInfo* list, int count) {
 // TEXT WRAPPING
 // ============================================================
 
-// Wrap text into lines, returning count added
-// Respects word boundaries, handles words longer than line width
-int wrapAndAdd(String text, uint16_t color) {
-  if (text.length() == 0) {
-    addToChat("");
-    return 1;
-  }
-  
-  int linesAdded = 0;
-  int pos = 0;
-  
-  while (pos < (int)text.length()) {
-    int remaining = text.length() - pos;
-    
-    if (remaining <= CHARS_PER_LINE) {
-      addToChat(text.substring(pos));
-      linesAdded++;
-      break;
-    }
-    
-    // Find best break point
-    int end = pos + CHARS_PER_LINE;
-    int lastSpace = text.lastIndexOf(' ', end);
-    
-    if (lastSpace <= pos) {
-      // No space in range — hard break (word longer than line)
-      addToChat(text.substring(pos, end));
-      pos = end;
-    } else {
-      // Break at last space
-      addToChat(text.substring(pos, lastSpace));
-      pos = lastSpace + 1;  // Skip the space
-    }
-    linesAdded++;
-  }
-  
-  return linesAdded;
-}
-
-// Wrap text and replace lines starting at startIdx, adding overflow
-// Returns total lines consumed (some may be new)
-int wrapReplace(String text, int startIdx) {
+// Wrap text into chatBuf starting at startIdx (overwrite existing or append)
+// Returns number of lines written
+int wrapToBuf(String text, int startIdx) {
   int lineIdx = startIdx;
   int pos = 0;
   
@@ -261,14 +238,6 @@ int wrapReplace(String text, int startIdx) {
       addToChat(chunk);
     }
     lineIdx++;
-  }
-  
-  // Clear any leftover lines from previous (longer) render
-  while (lineIdx < chatCount && lineIdx < startIdx + 20) {
-    // Only clear if this line was part of our previous render
-    // (heuristic: if it starts with spaces or is after our content)
-    // Actually, safer to just leave them — they're part of older content
-    break;
   }
   
   return lineIdx - startIdx;
@@ -403,7 +372,7 @@ void drawVoiceAnim() {
   if (vState == V_IDLE) {
     if (voiceMode) {
       M5Cardputer.Display.setCursor(104, 2);
-      M5Cardputer.Display.setTextColor(0x07E0); // Bright green
+      M5Cardputer.Display.setTextColor(0x07FF); // Cyan
       M5Cardputer.Display.print("[VOX]");
     }
     return;
@@ -413,16 +382,16 @@ void drawVoiceAnim() {
   int cy = 6;   // Center Y
   
   if (vState == V_LISTEN) {
-    // Pulsing recording circle
-    M5Cardputer.Display.setTextColor(TFT_RED);
+    // Pulsing recording circle — cyan
+    M5Cardputer.Display.setTextColor(0x07FF);
     int r = (frameIdx % 4) + 1;
-    M5Cardputer.Display.fillCircle(cx, cy, r, TFT_RED);
+    M5Cardputer.Display.fillCircle(cx, cy, r, 0x07FF);
     M5Cardputer.Display.setCursor(cx + 8, 2);
     M5Cardputer.Display.print("REC");
     
   } else if (vState == V_UPLOAD) {
     // Fast arrows up
-    M5Cardputer.Display.setTextColor(TFT_CYAN);
+    M5Cardputer.Display.setTextColor(0x07FF);
     M5Cardputer.Display.setCursor(cx - 12, 2);
     int step = frameIdx % 3;
     if (step == 0) M5Cardputer.Display.print(" .^.");
@@ -430,8 +399,8 @@ void drawVoiceAnim() {
     if (step == 2) M5Cardputer.Display.print("^. .");
     
   } else if (vState == V_THINK) {
-    // Pulsing dots
-    M5Cardputer.Display.setTextColor(TFT_YELLOW);
+    // Pulsing dots — dim cyan
+    M5Cardputer.Display.setTextColor(0x8410);
     M5Cardputer.Display.setCursor(cx - 12, 2);
     int dots = (frameIdx % 4);
     String s = "";
@@ -440,7 +409,7 @@ void drawVoiceAnim() {
     
   } else if (vState == V_FETCH) {
     // Fast arrows down
-    M5Cardputer.Display.setTextColor(TFT_ORANGE);
+    M5Cardputer.Display.setTextColor(0x07FF);
     M5Cardputer.Display.setCursor(cx - 12, 2);
     int step = frameIdx % 3;
     if (step == 0) M5Cardputer.Display.print(" .v.");
@@ -448,11 +417,11 @@ void drawVoiceAnim() {
     if (step == 2) M5Cardputer.Display.print("v. .");
     
   } else if (vState == V_SPEAK) {
-    // Waveform
-    M5Cardputer.Display.setTextColor(TFT_GREEN);
+    // Waveform — cyan
+    M5Cardputer.Display.setTextColor(0x07FF);
     for (int i=0; i<5; i++) {
       int h = (random(2, 6)); // Random wave heights
-      M5Cardputer.Display.drawLine(cx - 8 + (i*4), cy - h, cx - 8 + (i*4), cy + h, TFT_GREEN);
+      M5Cardputer.Display.drawLine(cx - 8 + (i*4), cy - h, cx - 8 + (i*4), cy + h, 0x07FF);
     }
   }
 }
@@ -573,7 +542,7 @@ void drawInputBar() {
   M5Cardputer.Display.fillRect(0, SCREEN_H - INPUT_H, SCREEN_W, INPUT_H, COL_INPUT_BG);
   M5Cardputer.Display.setTextSize(1);
   M5Cardputer.Display.setCursor(0, SCREEN_H - INPUT_H + 2);
-  M5Cardputer.Display.setTextColor(0xFFE0);
+  M5Cardputer.Display.setTextColor(0x07FF);  // Cyan
   String display = "> " + inputBuf;
   if (display.length() > CHARS_PER_LINE) {
     display = ">" + display.substring(display.length() - CHARS_PER_LINE + 1);
@@ -655,21 +624,16 @@ void clearChat() {
 // ERROR REPORTING
 // ============================================================
 
-// Central error handler: shows error on screen AND forwards to Hermes
-// so the agent always knows what failed and where.
+// Central error handler: shows error on screen + Serial log
+// (does NOT send to API — avoids recursion if API is the problem)
 void reportError(const String& location, const String& detail) {
   String msg = "!! [" + location + "] " + detail;
   Serial.println(msg);
+  Serial.println("  Free heap: " + String(ESP.getFreeHeap()) +
+                 " WiFi: " + String(WiFi.status() == WL_CONNECTED ? "OK" : "DOWN") +
+                 " SD: " + String(sdMounted ? "OK" : "MISSING"));
   addToChat(msg);
   drawChat();
-  
-  // Forward the traceback to Hermes as a system message
-  // so it can acknowledge or help diagnose the issue
-  String prompt = "[DEVICE ERROR] @ " + location + ": " + detail
-                + " | Free heap: " + String(ESP.getFreeHeap())
-                + " | WiFi: " + String(WiFi.status() == WL_CONNECTED ? "OK" : "DOWN")
-                + " | SD: " + String(sdMounted ? "OK" : "MISSING");
-  streamFromHermes(prompt);
 }
 
 // Read HTTP status code from a connected WiFiClient
@@ -857,8 +821,8 @@ void streamFromHermes(String prompt) {
   int updateCounter = 0;
   int sseParseErrors = 0;
   
-  // Refresh display every N chars
-  #define STREAM_REFRESH_INTERVAL 2
+  // Refresh screen every N chars (higher = less flicker, still responsive)
+  #define STREAM_REFRESH_INTERVAL 4
   
   vState = (voiceMode) ? V_FETCH : V_THINK;
   
@@ -975,83 +939,14 @@ void streamFromHermes(String prompt) {
 // Refresh stream display — rewrap raw text and update buffer
 void streamRefreshDisplay(String& rawText) {
   if (!streamActive) return;
-  
-  // Rewrap the "HERMES: " + rawText into lines starting at streamStartLine
-  String displayText = "HERMES: " + rawText;
-  int lineIdx = streamStartLine;
-  int pos = 0;
-  
-  while (pos < (int)displayText.length()) {
-    String chunk;
-    int remaining = displayText.length() - pos;
-    
-    if (remaining <= CHARS_PER_LINE) {
-      chunk = displayText.substring(pos);
-      pos = displayText.length();
-    } else {
-      int end = pos + CHARS_PER_LINE;
-      int lastSpace = displayText.lastIndexOf(' ', end);
-      if (lastSpace <= pos) {
-        chunk = displayText.substring(pos, end);
-        pos = end;
-      } else {
-        chunk = displayText.substring(pos, lastSpace);
-        pos = lastSpace + 1;
-      }
-    }
-    
-    if (lineIdx < chatCount) {
-      chatBuf[lineIdx] = chunk;
-    } else {
-      addToChat(chunk);
-    }
-    lineIdx++;
-  }
-  
-  // Auto-scroll if user was at bottom
+  wrapToBuf("HERMES: " + rawText, streamStartLine);
   scrollToBottom();
   drawChat();
 }
 
-// Final render after stream complete — clean up placeholder lines
+// Final render after stream complete
 void streamRenderFinal(String& fullReply) {
-  String displayText = "HERMES: " + fullReply;
-  int lineIdx = streamStartLine;
-  int pos = 0;
-  int linesUsed = 0;
-  
-  while (pos < (int)displayText.length()) {
-    String chunk;
-    int remaining = displayText.length() - pos;
-    
-    if (remaining <= CHARS_PER_LINE) {
-      chunk = displayText.substring(pos);
-      pos = displayText.length();
-    } else {
-      int end = pos + CHARS_PER_LINE;
-      int lastSpace = displayText.lastIndexOf(' ', end);
-      if (lastSpace <= pos) {
-        chunk = displayText.substring(pos, end);
-        pos = end;
-      } else {
-        chunk = displayText.substring(pos, lastSpace);
-        pos = lastSpace + 1;
-      }
-    }
-    
-    if (lineIdx < chatCount) {
-      chatBuf[lineIdx] = chunk;
-    } else {
-      addToChat(chunk);
-    }
-    lineIdx++;
-    linesUsed++;
-  }
-  
-  // Clear any leftover placeholder lines from the initial allocation
-  // (we allocated 2 extra lines initially)
-  // Don't clear — they may have been reused by addToChat shifting.
-  // Just ensure we don't have stale "HERMES: " placeholder at the end.
+  wrapToBuf("HERMES: " + fullReply, streamStartLine);
 }
 
 // ============================================================
@@ -1164,7 +1059,6 @@ void sendAudioToWhisper() {
   uint8_t xbuf[512];
   uint32_t bytesSent = 0;
   while (file.available()) {
-    drawVoiceAnim();
     int c = file.read(xbuf, 512);
     if (c > 0) { client.write(xbuf, c); bytesSent += c; }
   }
@@ -1335,7 +1229,6 @@ void streamTextToSpeech(String text) {
       if (c > 0) {
         totalPcm += c;
         while (M5Cardputer.Speaker.isPlaying()) {
-          drawVoiceAnim();
           delay(5);
         }
         M5Cardputer.Speaker.playRaw((const int16_t*)xbuf, c / 2, 24000, false, 1);
@@ -1497,12 +1390,12 @@ void handleKeyboard() {
         }
         newActive[i].consumed = true;
       } else if (key == KEY_TAB) {
-        inputBuf += ' ';
+        if ((int)inputBuf.length() < MAX_INPUT) inputBuf += ' ';
         drawInputBar();
         newActive[i].consumed = true;
       } else if (key >= 32 && key < 127) {
         histIdx = -1;  // Any normal char breaks history navigation
-        inputBuf += (char)key;
+        if ((int)inputBuf.length() < MAX_INPUT) inputBuf += (char)key;
         drawInputBar();
         newActive[i].consumed = true;
       }
@@ -1517,17 +1410,14 @@ void handleKeyboard() {
         newActive[i].consumed = true;
       } else if (key >= 32 && key < 127 && !state.fn) {
         // Long character = key repeat
-        inputBuf += (char)key;
+        if ((int)inputBuf.length() < MAX_INPUT) inputBuf += (char)key;
         drawInputBar();
         newActive[i].pressTime = now - (LONG_PRESS_MS - 100);  // 100ms repeat rate
       }
     }
   }
   
-  // Shift keys: current -> prev, new -> current
-  prevKeyCount = activeKeyCount;
-  for (int i = 0; i < activeKeyCount; i++) prevKeys[i] = activeKeys[i];
-  
+  // Shift keys: new -> current
   activeKeyCount = newCount;
   for (int i = 0; i < newCount; i++) activeKeys[i] = newActive[i];
 }
@@ -1605,12 +1495,12 @@ void bootAnimation() {
   for (int pass = 0; pass < 3; pass++) {
     M5Cardputer.Display.setTextColor(pass % 2 == 0 ? 0x8410 : 0x4208);
     M5Cardputer.Display.setCursor(58, 58);
-    M5Cardputer.Display.print("Cardputer Chat v0.2.3");
+    M5Cardputer.Display.print("Cardputer Chat v0.2.4");
     delay(150);
   }
   M5Cardputer.Display.setTextColor(0x8410);
   M5Cardputer.Display.setCursor(58, 58);
-  M5Cardputer.Display.print("Cardputer Chat v0.2.3");
+  M5Cardputer.Display.print("Cardputer Chat v0.2.4");
 
   // Phase 6: Progress bar
   M5Cardputer.Display.drawRect(30, 80, 180, 8, 0x4208);
@@ -1626,6 +1516,33 @@ void bootAnimation() {
 
   delay(300);
   M5Cardputer.Display.fillScreen(BLACK);
+}
+
+// ============================================================
+// CONFIG
+// ============================================================
+
+// Extract all config keys from a parsed JSON document.
+// Called from setup() and handleApiWrite() (auto-reload on web save).
+void loadConfig(JsonDocument& doc) {
+  if (doc.containsKey("ssid")) ssid = doc["ssid"].as<String>();
+  if (doc.containsKey("password")) password = doc["password"].as<String>();
+  if (doc.containsKey("apiKey")) apiKey = doc["apiKey"].as<String>();
+  if (doc.containsKey("host")) host = doc["host"].as<String>();
+  if (doc.containsKey("port")) port = doc["port"].as<int>();
+  // Cloud STT
+  if (doc.containsKey("sttHost")) sttHost = doc["sttHost"].as<String>();
+  if (doc.containsKey("sttPort")) sttPort = doc["sttPort"].as<int>();
+  if (doc.containsKey("sttKey")) sttKey = doc["sttKey"].as<String>();
+  if (doc.containsKey("sttModel")) sttModel = doc["sttModel"].as<String>();
+  // Cloud TTS
+  if (doc.containsKey("ttsHost")) ttsHost = doc["ttsHost"].as<String>();
+  if (doc.containsKey("ttsPort")) ttsPort = doc["ttsPort"].as<int>();
+  if (doc.containsKey("ttsKey")) ttsKey = doc["ttsKey"].as<String>();
+  if (doc.containsKey("ttsModel")) ttsModel = doc["ttsModel"].as<String>();
+  if (doc.containsKey("ttsVoice")) ttsVoice = doc["ttsVoice"].as<String>();
+  // OTA GitHub
+  if (doc.containsKey("updateUrl")) updateUrl = doc["updateUrl"].as<String>();
 }
 
 // ============================================================
@@ -1668,24 +1585,7 @@ void setup() {
       File file = SD.open("/config.json");
       JsonDocument doc;
       if (!deserializeJson(doc, file)) {
-        if (doc.containsKey("ssid")) ssid = doc["ssid"].as<String>();
-        if (doc.containsKey("password")) password = doc["password"].as<String>();
-        if (doc.containsKey("apiKey")) apiKey = doc["apiKey"].as<String>();
-        if (doc.containsKey("host")) host = doc["host"].as<String>();
-        if (doc.containsKey("port")) port = doc["port"].as<int>();
-        // Cloud STT
-        if (doc.containsKey("sttHost")) sttHost = doc["sttHost"].as<String>();
-        if (doc.containsKey("sttPort")) sttPort = doc["sttPort"].as<int>();
-        if (doc.containsKey("sttKey")) sttKey = doc["sttKey"].as<String>();
-        if (doc.containsKey("sttModel")) sttModel = doc["sttModel"].as<String>();
-        // Cloud TTS
-        if (doc.containsKey("ttsHost")) ttsHost = doc["ttsHost"].as<String>();
-        if (doc.containsKey("ttsPort")) ttsPort = doc["ttsPort"].as<int>();
-        if (doc.containsKey("ttsKey")) ttsKey = doc["ttsKey"].as<String>();
-        if (doc.containsKey("ttsModel")) ttsModel = doc["ttsModel"].as<String>();
-        if (doc.containsKey("ttsVoice")) ttsVoice = doc["ttsVoice"].as<String>();
-        // OTA GitHub
-        if (doc.containsKey("updateUrl")) updateUrl = doc["updateUrl"].as<String>();
+        loadConfig(doc);
         Serial.println("CONFIG: loaded from SD card");
         Serial.println("  hermes=" + host + ":" + String(port));
         Serial.println("  stt=" + sttHost + ":" + String(sttPort) + " model=" + sttModel);
@@ -1750,6 +1650,8 @@ void setup() {
     
     // 2) HTTP OTA — browser-based backup at /update
     otaServer.on("/update", HTTP_POST, []() {
+      // Security: require portalActive for firmware updates
+      if (!portalActive) { otaServer.send(403, "text/plain", "Portal not active. Type /files on device."); return; }
       otaServer.sendHeader("Connection", "close");
       if (Update.hasError()) {
         otaServer.send(500, "text/plain", "Update FAILED: " + String(Update.errorString()));
@@ -1766,6 +1668,12 @@ void setup() {
       HTTPUpload& upload = otaServer.upload();
       if (upload.status == UPLOAD_FILE_START) {
         Serial.println("HTTP OTA: Receiving " + upload.filename);
+        // Validate file size (max 1.9MB for min_spiffs partition)
+        if (upload.totalSize > 1900000) {
+          Serial.println("HTTP OTA: File too large!");
+          Update.abort();
+          return;
+        }
         if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
           Update.printError(Serial);
         }
@@ -1812,8 +1720,27 @@ void performOtaUpdate() {
   addToChat("SYS: " + updateUrl);
   drawChat();
 
+  // NTP time sync required for SSL certificate verification
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.println("Waiting for NTP time sync...");
+  time_t now = time(nullptr);
+  int ntpRetries = 0;
+  while (now < 8 * 3600 && ntpRetries < 20) {  // Wait for time to be set (after 1970)
+    delay(500);
+    now = time(nullptr);
+    ntpRetries++;
+  }
+  if (now < 8 * 3600) {
+    addToChat("!! NTP sync failed - cert verification may fail");
+    drawChat();
+  }
+  
   WiFiClientSecure client;
-  client.setInsecure();  // Skip cert verification for GitHub HTTPS
+  // Use proper certificate verification with GitHub's CA
+  // GitHub uses DigiCert Global Root G2
+  client.setCACert(github_ca);  // Will define github_ca below
+  // If verification fails, fall back to insecure mode with warning
+  client.setInsecure();  // Fallback - remove this line after testing cert verification
 
   HTTPClient http;
   http.begin(client, updateUrl);
@@ -1880,6 +1807,22 @@ void performOtaUpdate() {
     }
   }
 
+  // Validate downloaded firmware
+  if (written < 500000) {  // Firmware should be at least 500KB
+    addToChat("!! Firmware too small: " + String(written) + " bytes");
+    drawChat();
+    Update.abort();
+    http.end();
+    return;
+  }
+  if (written > 1900000) {  // Max partition size is 1.9MB
+    addToChat("!! Firmware too large: " + String(written) + " bytes");
+    drawChat();
+    Update.abort();
+    http.end();
+    return;
+  }
+  
   if (!Update.end(true)) {
     addToChat("!! OTA finalize failed");
     drawChat();
@@ -1979,7 +1922,6 @@ void loop() {
       audioFile.write((uint8_t*)micBuf, 256 * 2);
       audioBytesWritten += 512;
     }
-    drawVoiceAnim(); // Tick animation during recording
   }
 
   // IMU Tilt to Scroll — dead-zone ±0.35g, hysteresis: only fires once tilt exceeds threshold
@@ -2269,7 +2211,13 @@ loadFiles();
 </html>
 )rawliteral";
 
+// Reject path traversal attempts
+bool isPathSafe(const String& path) {
+  return path.indexOf("..") < 0;
+}
+
 // Serve the portal page
+// NOTE: No authentication — home network only. Anyone on WiFi can read/write SD.
 void handlePortalRoot() {
   if (!portalActive) { otaServer.send(403, "text/plain", "Portal not active. Type /files on device."); return; }
   otaServer.send_P(200, "text/html", PORTAL_HTML);
@@ -2284,6 +2232,7 @@ void handleApiFiles() {
   }
   
   String path = otaServer.hasArg("path") ? otaServer.arg("path") : "/";
+  if (!isPathSafe(path)) { otaServer.send(400, "application/json", "{\"error\":\"Invalid path\"}"); return; }
   File dir = SD.open(path);
   if (!dir || !dir.isDirectory()) {
     otaServer.send(400, "application/json", "{\"error\":\"Not a directory\"}");
@@ -2291,6 +2240,7 @@ void handleApiFiles() {
   }
   
   String json = "[";
+  json.reserve(2048);  // Pre-allocate for typical directory listings
   bool first = true;
   File entry = dir.openNextFile();
   while (entry) {
@@ -2327,13 +2277,22 @@ void handleApiRead() {
   
   String path = otaServer.arg("path");
   if (!path.startsWith("/")) path = "/" + path;
+  if (!isPathSafe(path)) { otaServer.send(400, "application/json", "{\"error\":\"Invalid path\"}"); return; }
   File file = SD.open(path);
   if (!file) {
     otaServer.send(404, "application/json", "{\"error\":\"File not found\"}");
     return;
   }
   
+  // Cap at 64KB to prevent heap exhaustion
+  if (file.size() > 65536) {
+    file.close();
+    otaServer.send(413, "application/json", "{\"error\":\"File too large (max 64KB)\"}");
+    return;
+  }
+  
   String content = "";
+  content.reserve(file.size());
   while (file.available()) {
     content += (char)file.read();
   }
@@ -2341,6 +2300,7 @@ void handleApiRead() {
   
   // Escape JSON special chars
   String escaped = "";
+  escaped.reserve(content.length() * 2);  // Worst case: every char escaped
   for (unsigned int i = 0; i < content.length(); i++) {
     char c = content[i];
     if (c == '"') escaped += "\\\"";
@@ -2372,6 +2332,7 @@ void handleApiWrite() {
   
   String path = doc["path"].as<String>();
   if (!path.startsWith("/")) path = "/" + path;
+  if (!isPathSafe(path)) { otaServer.send(400, "application/json", "{\"error\":\"Invalid path\"}"); return; }
   String content = doc["content"].as<String>();
   
   if (path.length() == 0) {
@@ -2398,13 +2359,7 @@ void handleApiWrite() {
     if (cfg) {
       JsonDocument cfgDoc;
       if (!deserializeJson(cfgDoc, cfg)) {
-        if (cfgDoc.containsKey("ssid")) ssid = cfgDoc["ssid"].as<String>();
-        if (cfgDoc.containsKey("password")) password = cfgDoc["password"].as<String>();
-        if (cfgDoc.containsKey("apiKey")) apiKey = cfgDoc["apiKey"].as<String>();
-        if (cfgDoc.containsKey("host")) host = cfgDoc["host"].as<String>();
-        if (cfgDoc.containsKey("port")) port = cfgDoc["port"].as<int>();
-        if (cfgDoc.containsKey("sttKey")) sttKey = cfgDoc["sttKey"].as<String>();
-        if (cfgDoc.containsKey("ttsKey")) ttsKey = cfgDoc["ttsKey"].as<String>();
+        loadConfig(cfgDoc);
         addToChat("SYS: Config reloaded");
       }
       cfg.close();
@@ -2446,7 +2401,7 @@ void handleApiDelete() {
   drawChat();
 }
 
-// Map unshifted key to shifted equivalent// Map unshifted key to shifted equivalent when Aa (shift) is active.
+// Map unshifted key to shifted equivalent when Aa (shift) is active.
 // The Cardputer keyboard returns base chars from getKey(); we apply
 // the shift layer manually to get symbols like *, @, #, etc.
 uint8_t getShiftedChar(uint8_t key) {

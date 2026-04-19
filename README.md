@@ -2,7 +2,7 @@
 
 WiFi chat terminal for OpenAI-compatible API servers. Runs on M5Stack Cardputer (ESP32-S3).
 
-![Firmware](https://img.shields.io/badge/firmware-v0.2.3-blue)
+![Firmware](https://img.shields.io/badge/firmware-v0.2.4-blue)
 ![Board](https://img.shields.io/badge/board-M5Stack%20Cardputer-green)
 ![Arduino](https://img.shields.io/badge/arduino-ESP32%20S3-orange)
 
