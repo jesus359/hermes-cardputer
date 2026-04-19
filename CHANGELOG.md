@@ -36,7 +36,7 @@
 - `wrapToBuf()` is the single wrapping function; `streamRefreshDisplay` and
   `streamRenderFinal` are thin wrappers around it
 - Firmware size: 1,386,143 bytes (70% of 1.9MB partition)
-- Uploaded via HTTP OTA to 192.168.0.203
+- Uploaded via HTTP OTA to <DEVICE_IP>
 
 ---
 
@@ -80,7 +80,7 @@
 - `SD.open()` requires leading `/` — `entry.name()` returns relative paths, normalized in all API handlers
 - `portalActive` flag controls screen display, not server lifecycle
 - `drawPortalScreen()` draws pixel-art folder icon, WiFi arcs, IP, hint text
-- Uploaded via HTTP OTA to 192.168.0.203
+- Uploaded via HTTP OTA to <DEVICE_IP>
 
 ---
 
@@ -95,7 +95,7 @@
 
 ### Technical Notes
 - Firmware size: 1,358,091 bytes (69%)
-- Uploaded via HTTP OTA to 192.168.0.203
+- Uploaded via HTTP OTA to <DEVICE_IP>
 
 ---
 
@@ -138,7 +138,7 @@
 **Initial working version.** WiFi chat with Hermes.
 
 ### Features
-- WiFi direct connection to Hermes API (192.168.0.240:11434)
+- WiFi direct connection to Hermes API (<DEVICE_IP>:11434)
 - Streaming SSE responses with real-time display
 - Scrollable chat buffer (200 lines)
 - Status bar with WiFi RSSI, battery, API state
